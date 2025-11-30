@@ -56,6 +56,7 @@ private:
     HWND m_hCheckAutoRefresh;
     HWND m_hEditRefreshTime;
     HWND m_hStaticMs;
+    HWND m_hStaticSearch;
     HINSTANCE m_hInstance;
     HIMAGELIST m_hImageList;
 

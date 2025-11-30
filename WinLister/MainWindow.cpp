@@ -47,6 +47,7 @@ MainWindow::MainWindow()
     , m_hCheckAutoRefresh(nullptr)
     , m_hEditRefreshTime(nullptr)
     , m_hStaticMs(nullptr)
+    , m_hStaticSearch(nullptr)
     , m_hInstance(nullptr)
     , m_hImageList(nullptr)
     , m_hideHidden(true)
@@ -239,7 +240,7 @@ void MainWindow::CreateControls() {
     );
 
     // Search box
-    CreateWindowExW(0, L"STATIC", L"Search:",
+    m_hStaticSearch = CreateWindowExW(0, L"STATIC", L"Search:",
         WS_CHILD | WS_VISIBLE,
         10, 12, 50, 20,
         m_hwnd, nullptr, m_hInstance, nullptr);
@@ -310,6 +311,7 @@ void MainWindow::CreateControls() {
     );
 
     // Apply font
+    SendMessage(m_hStaticSearch, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hEditSearch, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hCheckHideHidden, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hCheckHideSystem, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
@@ -813,6 +815,9 @@ void MainWindow::SetDarkModeForWindow(HWND hwnd) {
 void MainWindow::ApplyDarkMode() {
     SetDarkModeForWindow(m_hwnd);
 
+    const wchar_t* buttonTheme = m_darkMode ? L"DarkMode_Explorer" : nullptr;
+    const wchar_t* editTheme = m_darkMode ? L"DarkMode_CFD" : nullptr;
+
     if (m_darkMode) {
         // Apply dark theme to ListView
         SetWindowTheme(m_hListView, L"DarkMode_Explorer", nullptr);
@@ -833,9 +838,26 @@ void MainWindow::ApplyDarkMode() {
         SetWindowTheme(hHeader, L"ItemsView", nullptr);
     }
 
-    // Force redraw
+    // Apply dark theme to buttons and checkboxes
+    SetWindowTheme(m_hCheckHideHidden, buttonTheme, nullptr);
+    SetWindowTheme(m_hCheckHideSystem, buttonTheme, nullptr);
+    SetWindowTheme(m_hCheckAutoRefresh, buttonTheme, nullptr);
+    SetWindowTheme(m_hBtnRefresh, buttonTheme, nullptr);
+
+    // Apply dark theme to edit controls
+    SetWindowTheme(m_hEditSearch, editTheme, nullptr);
+    SetWindowTheme(m_hEditRefreshTime, editTheme, nullptr);
+
+    // Force redraw all controls
     InvalidateRect(m_hwnd, nullptr, TRUE);
     InvalidateRect(m_hListView, nullptr, TRUE);
+    InvalidateRect(m_hCheckHideHidden, nullptr, TRUE);
+    InvalidateRect(m_hCheckHideSystem, nullptr, TRUE);
+    InvalidateRect(m_hCheckAutoRefresh, nullptr, TRUE);
+    InvalidateRect(m_hBtnRefresh, nullptr, TRUE);
+    InvalidateRect(m_hStaticSearch, nullptr, TRUE);
+    InvalidateRect(m_hStaticMs, nullptr, TRUE);
+    InvalidateRect(m_hStaticCount, nullptr, TRUE);
 }
 
 void MainWindow::UpdateDarkMode() {
