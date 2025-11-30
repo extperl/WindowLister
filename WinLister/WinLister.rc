@@ -1,0 +1,13 @@
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+
+IDD_DETAIL DIALOGEX 0, 0, 450, 350
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Window Details"
+FONT 9, "Segoe UI"
+BEGIN
+    CONTROL         "", IDC_DETAIL_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 7, 7, 436, 306
+    PUSHBUTTON      "Copy", IDC_BTN_COPY, 285, 320, 70, 20
+    PUSHBUTTON      "Close", IDC_BTN_CLOSE, 365, 320, 70, 20
+END
