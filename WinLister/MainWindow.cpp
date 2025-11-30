@@ -160,6 +160,112 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+LRESULT CALLBACK MainWindow::HeaderProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+    MainWindow* pThis = reinterpret_cast<MainWindow*>(dwRefData);
+
+    if (msg == WM_PAINT && pThis->m_darkMode) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        // Get header info
+        int itemCount = Header_GetItemCount(hwnd);
+
+        // Fill entire header background
+        RECT rcHeader;
+        GetClientRect(hwnd, &rcHeader);
+        HBRUSH hBgBrush = CreateSolidBrush(RGB(50, 50, 50));
+        FillRect(hdc, &rcHeader, hBgBrush);
+        DeleteObject(hBgBrush);
+
+        // Draw each header item
+        for (int i = 0; i < itemCount; i++) {
+            RECT rcItem;
+            Header_GetItemRect(hwnd, i, &rcItem);
+
+            // Get item text and format
+            wchar_t text[256] = {};
+            HDITEMW hdi = {};
+            hdi.mask = HDI_TEXT | HDI_FORMAT;
+            hdi.pszText = text;
+            hdi.cchTextMax = 256;
+            Header_GetItem(hwnd, i, &hdi);
+
+            // Draw item background
+            HBRUSH hItemBrush = CreateSolidBrush(RGB(50, 50, 50));
+            FillRect(hdc, &rcItem, hItemBrush);
+            DeleteObject(hItemBrush);
+
+            // Draw right border
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(70, 70, 70));
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            MoveToEx(hdc, rcItem.right - 1, rcItem.top, nullptr);
+            LineTo(hdc, rcItem.right - 1, rcItem.bottom);
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hPen);
+
+            // Draw bottom border
+            HPEN hBottomPen = CreatePen(PS_SOLID, 1, RGB(70, 70, 70));
+            hOldPen = (HPEN)SelectObject(hdc, hBottomPen);
+            MoveToEx(hdc, rcItem.left, rcItem.bottom - 1, nullptr);
+            LineTo(hdc, rcItem.right, rcItem.bottom - 1);
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hBottomPen);
+
+            // Draw text
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, DARK_TEXT);
+            RECT textRect = rcItem;
+            textRect.left += 6;
+            textRect.right -= 12;
+            DrawTextW(hdc, text, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+            // Draw sort arrow if present
+            if (hdi.fmt & HDF_SORTUP) {
+                int cx = rcItem.right - 12;
+                int cy = rcItem.top + (rcItem.bottom - rcItem.top) / 2;
+                POINT pts[3] = { {cx, cy - 3}, {cx + 4, cy + 2}, {cx - 4, cy + 2} };
+                HPEN hArrowPen = CreatePen(PS_SOLID, 1, DARK_TEXT);
+                HBRUSH hArrowBrush = CreateSolidBrush(DARK_TEXT);
+                HPEN hOldPen2 = (HPEN)SelectObject(hdc, hArrowPen);
+                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hArrowBrush);
+                Polygon(hdc, pts, 3);
+                SelectObject(hdc, hOldPen2);
+                SelectObject(hdc, hOldBrush);
+                DeleteObject(hArrowPen);
+                DeleteObject(hArrowBrush);
+            } else if (hdi.fmt & HDF_SORTDOWN) {
+                int cx = rcItem.right - 12;
+                int cy = rcItem.top + (rcItem.bottom - rcItem.top) / 2;
+                POINT pts[3] = { {cx, cy + 3}, {cx + 4, cy - 2}, {cx - 4, cy - 2} };
+                HPEN hArrowPen = CreatePen(PS_SOLID, 1, DARK_TEXT);
+                HBRUSH hArrowBrush = CreateSolidBrush(DARK_TEXT);
+                HPEN hOldPen2 = (HPEN)SelectObject(hdc, hArrowPen);
+                HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hArrowBrush);
+                Polygon(hdc, pts, 3);
+                SelectObject(hdc, hOldPen2);
+                SelectObject(hdc, hOldBrush);
+                DeleteObject(hArrowPen);
+                DeleteObject(hArrowBrush);
+            }
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    if (msg == WM_ERASEBKGND && pThis->m_darkMode) {
+        HDC hdc = (HDC)wParam;
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50));
+        FillRect(hdc, &rc, hBrush);
+        DeleteObject(hBrush);
+        return 1;
+    }
+
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
@@ -446,6 +552,10 @@ void MainWindow::CreateListView() {
         col.pszText = const_cast<wchar_t*>(columns[i].name);
         ListView_InsertColumn(m_hListView, i, &col);
     }
+
+    // Subclass the header for dark mode custom drawing
+    HWND hHeader = ListView_GetHeader(m_hListView);
+    SetWindowSubclass(hHeader, HeaderProc, 1, reinterpret_cast<DWORD_PTR>(this));
 }
 
 void MainWindow::OnSize(int width, int height) {
@@ -519,73 +629,6 @@ void MainWindow::OnCommand(WORD id, WORD notifyCode) {
 }
 
 LRESULT MainWindow::OnNotify(NMHDR* pnmhdr) {
-    // Handle header custom draw for dark mode
-    HWND hHeader = ListView_GetHeader(m_hListView);
-    if (pnmhdr->hwndFrom == hHeader && pnmhdr->code == NM_CUSTOMDRAW && m_darkMode) {
-        NMCUSTOMDRAW* pcd = reinterpret_cast<NMCUSTOMDRAW*>(pnmhdr);
-        switch (pcd->dwDrawStage) {
-        case CDDS_PREPAINT:
-            return CDRF_NOTIFYITEMDRAW;
-        case CDDS_ITEMPREPAINT: {
-            // Get header item info
-            wchar_t text[256] = {};
-            HDITEMW hdi = {};
-            hdi.mask = HDI_TEXT | HDI_FORMAT;
-            hdi.pszText = text;
-            hdi.cchTextMax = 256;
-            Header_GetItem(hHeader, pcd->dwItemSpec, &hdi);
-
-            // Fill background with dark color
-            HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50));
-            FillRect(pcd->hdc, &pcd->rc, hBrush);
-            DeleteObject(hBrush);
-
-            // Draw border
-            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(70, 70, 70));
-            HPEN hOldPen = (HPEN)SelectObject(pcd->hdc, hPen);
-            MoveToEx(pcd->hdc, pcd->rc.right - 1, pcd->rc.top, nullptr);
-            LineTo(pcd->hdc, pcd->rc.right - 1, pcd->rc.bottom);
-            SelectObject(pcd->hdc, hOldPen);
-            DeleteObject(hPen);
-
-            // Draw text
-            SetBkMode(pcd->hdc, TRANSPARENT);
-            SetTextColor(pcd->hdc, DARK_TEXT);
-            RECT textRect = pcd->rc;
-            textRect.left += 6;
-            textRect.right -= 6;
-            DrawTextW(pcd->hdc, text, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-            // Draw sort arrow if present
-            if (hdi.fmt & HDF_SORTUP) {
-                int cx = (pcd->rc.right - 10);
-                int cy = pcd->rc.top + (pcd->rc.bottom - pcd->rc.top) / 2;
-                POINT pts[3] = { {cx, cy - 3}, {cx + 4, cy + 2}, {cx - 4, cy + 2} };
-                HPEN hArrowPen = CreatePen(PS_SOLID, 1, DARK_TEXT);
-                HBRUSH hArrowBrush = CreateSolidBrush(DARK_TEXT);
-                SelectObject(pcd->hdc, hArrowPen);
-                SelectObject(pcd->hdc, hArrowBrush);
-                Polygon(pcd->hdc, pts, 3);
-                DeleteObject(hArrowPen);
-                DeleteObject(hArrowBrush);
-            } else if (hdi.fmt & HDF_SORTDOWN) {
-                int cx = (pcd->rc.right - 10);
-                int cy = pcd->rc.top + (pcd->rc.bottom - pcd->rc.top) / 2;
-                POINT pts[3] = { {cx, cy + 3}, {cx + 4, cy - 2}, {cx - 4, cy - 2} };
-                HPEN hArrowPen = CreatePen(PS_SOLID, 1, DARK_TEXT);
-                HBRUSH hArrowBrush = CreateSolidBrush(DARK_TEXT);
-                SelectObject(pcd->hdc, hArrowPen);
-                SelectObject(pcd->hdc, hArrowBrush);
-                Polygon(pcd->hdc, pts, 3);
-                DeleteObject(hArrowPen);
-                DeleteObject(hArrowBrush);
-            }
-
-            return CDRF_SKIPDEFAULT;
-        }
-        }
-    }
-
     if (pnmhdr->idFrom == IDC_LISTVIEW) {
         switch (pnmhdr->code) {
         case NM_DBLCLK: {
