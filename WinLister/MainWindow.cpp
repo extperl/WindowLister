@@ -229,6 +229,61 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             return 1;
         }
         break;
+
+    case WM_DRAWITEM: {
+        DRAWITEMSTRUCT* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+        if (dis->CtlType == ODT_BUTTON && m_darkMode) {
+            // Get button text
+            wchar_t text[256] = {};
+            GetWindowTextW(dis->hwndItem, text, 256);
+
+            // Fill background
+            FillRect(dis->hDC, &dis->rcItem, m_hDarkBrush);
+
+            // Draw checkbox
+            RECT checkRect = dis->rcItem;
+            checkRect.right = checkRect.left + 14;
+            checkRect.top += (dis->rcItem.bottom - dis->rcItem.top - 14) / 2;
+            checkRect.bottom = checkRect.top + 14;
+
+            // Draw checkbox border
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(150, 150, 150));
+            HPEN hOldPen = (HPEN)SelectObject(dis->hDC, hPen);
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+            Rectangle(dis->hDC, checkRect.left, checkRect.top, checkRect.right, checkRect.bottom);
+            SelectObject(dis->hDC, hOldBrush);
+            SelectObject(dis->hDC, hOldPen);
+            DeleteObject(hPen);
+
+            // Check if this checkbox is checked based on control ID
+            bool isChecked = false;
+            int ctlId = GetDlgCtrlID(dis->hwndItem);
+            if (ctlId == IDC_CHECK_HIDE_HIDDEN) isChecked = m_hideHidden;
+            else if (ctlId == IDC_CHECK_HIDE_SYSTEM) isChecked = m_hideSystem;
+            else if (ctlId == IDC_CHECK_AUTO_REFRESH) isChecked = m_autoRefresh;
+
+            // Draw checkmark if checked
+            if (isChecked) {
+                HPEN hCheckPen = CreatePen(PS_SOLID, 2, DARK_TEXT);
+                HPEN hOldPen2 = (HPEN)SelectObject(dis->hDC, hCheckPen);
+                MoveToEx(dis->hDC, checkRect.left + 3, checkRect.top + 7, nullptr);
+                LineTo(dis->hDC, checkRect.left + 5, checkRect.top + 10);
+                LineTo(dis->hDC, checkRect.left + 11, checkRect.top + 3);
+                SelectObject(dis->hDC, hOldPen2);
+                DeleteObject(hCheckPen);
+            }
+
+            // Draw text
+            RECT textRect = dis->rcItem;
+            textRect.left += 18;
+            SetBkMode(dis->hDC, TRANSPARENT);
+            SetTextColor(dis->hDC, DARK_TEXT);
+            DrawTextW(dis->hDC, text, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+            return TRUE;
+        }
+        break;
+    }
     }
 
     return DefWindowProcW(m_hwnd, msg, wParam, lParam);
@@ -263,31 +318,35 @@ void MainWindow::CreateControls() {
         m_hwnd, reinterpret_cast<HMENU>(IDC_EDIT_SEARCH), m_hInstance, nullptr
     );
 
-    // Checkboxes
+    // Checkboxes - use BS_OWNERDRAW for dark mode support
+    DWORD checkboxStyle = WS_CHILD | WS_VISIBLE | (m_darkMode ? BS_OWNERDRAW : BS_AUTOCHECKBOX);
+
     m_hCheckHideHidden = CreateWindowExW(
         0, L"BUTTON", L"Hide hidden windows",
-        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        checkboxStyle,
         280, 12, 150, 20,
         m_hwnd, reinterpret_cast<HMENU>(IDC_CHECK_HIDE_HIDDEN), m_hInstance, nullptr
     );
-    Button_SetCheck(m_hCheckHideHidden, BST_CHECKED);
 
     m_hCheckHideSystem = CreateWindowExW(
         0, L"BUTTON", L"Hide system windows",
-        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        checkboxStyle,
         440, 12, 150, 20,
         m_hwnd, reinterpret_cast<HMENU>(IDC_CHECK_HIDE_SYSTEM), m_hInstance, nullptr
     );
-    Button_SetCheck(m_hCheckHideSystem, BST_CHECKED);
 
     // Auto refresh checkbox
     m_hCheckAutoRefresh = CreateWindowExW(
         0, L"BUTTON", L"Auto refresh",
-        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        checkboxStyle,
         600, 12, 100, 20,
         m_hwnd, reinterpret_cast<HMENU>(IDC_CHECK_AUTO_REFRESH), m_hInstance, nullptr
     );
-    Button_SetCheck(m_hCheckAutoRefresh, BST_CHECKED);
+
+    // Set initial check states (works for both AUTOCHECKBOX and OWNERDRAW)
+    m_hideHidden = true;
+    m_hideSystem = true;
+    m_autoRefresh = true;
 
     // Refresh interval edit
     m_hEditRefreshTime = CreateWindowExW(
@@ -403,12 +462,24 @@ void MainWindow::OnCommand(WORD id, WORD notifyCode) {
         break;
 
     case IDC_CHECK_HIDE_HIDDEN:
-        m_hideHidden = Button_GetCheck(m_hCheckHideHidden) == BST_CHECKED;
+        if (m_darkMode) {
+            // Owner-draw mode: toggle manually
+            m_hideHidden = !m_hideHidden;
+            InvalidateRect(m_hCheckHideHidden, nullptr, TRUE);
+        } else {
+            // Auto checkbox mode: read from control
+            m_hideHidden = Button_GetCheck(m_hCheckHideHidden) == BST_CHECKED;
+        }
         ApplyFilter();
         break;
 
     case IDC_CHECK_HIDE_SYSTEM:
-        m_hideSystem = Button_GetCheck(m_hCheckHideSystem) == BST_CHECKED;
+        if (m_darkMode) {
+            m_hideSystem = !m_hideSystem;
+            InvalidateRect(m_hCheckHideSystem, nullptr, TRUE);
+        } else {
+            m_hideSystem = Button_GetCheck(m_hCheckHideSystem) == BST_CHECKED;
+        }
         ApplyFilter();
         break;
 
@@ -422,7 +493,12 @@ void MainWindow::OnCommand(WORD id, WORD notifyCode) {
         break;
 
     case IDC_CHECK_AUTO_REFRESH:
-        m_autoRefresh = Button_GetCheck(m_hCheckAutoRefresh) == BST_CHECKED;
+        if (m_darkMode) {
+            m_autoRefresh = !m_autoRefresh;
+            InvalidateRect(m_hCheckAutoRefresh, nullptr, TRUE);
+        } else {
+            m_autoRefresh = Button_GetCheck(m_hCheckAutoRefresh) == BST_CHECKED;
+        }
         UpdateAutoRefresh();
         break;
 
