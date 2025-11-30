@@ -451,10 +451,17 @@ void MainWindow::CreateControls() {
         m_hwnd, reinterpret_cast<HMENU>(IDC_CHECK_AUTO_REFRESH), m_hInstance, nullptr
     );
 
-    // Set initial check states (works for both AUTOCHECKBOX and OWNERDRAW)
+    // Set initial check states
     m_hideHidden = true;
     m_hideSystem = true;
     m_autoRefresh = true;
+
+    // For light mode (BS_AUTOCHECKBOX), set the visual check state
+    if (!m_darkMode) {
+        Button_SetCheck(m_hCheckHideHidden, BST_CHECKED);
+        Button_SetCheck(m_hCheckHideSystem, BST_CHECKED);
+        Button_SetCheck(m_hCheckAutoRefresh, BST_CHECKED);
+    }
 
     // Refresh interval edit
     m_hEditRefreshTime = CreateWindowExW(
