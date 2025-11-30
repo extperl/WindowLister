@@ -7,6 +7,8 @@
 #define IDC_BTN_REFRESH         1004
 #define IDC_STATIC_COUNT        1005
 #define IDC_EDIT_SEARCH         1006
+#define IDC_CHECK_AUTO_REFRESH  1007
+#define IDC_EDIT_REFRESH_TIME   1008
 
 // Menu IDs
 #define IDM_FILE_EXIT           2001

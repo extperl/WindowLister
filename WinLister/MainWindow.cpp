@@ -21,12 +21,17 @@ MainWindow::MainWindow()
     , m_hBtnRefresh(nullptr)
     , m_hStaticCount(nullptr)
     , m_hEditSearch(nullptr)
+    , m_hCheckAutoRefresh(nullptr)
+    , m_hEditRefreshTime(nullptr)
+    , m_hStaticMs(nullptr)
     , m_hInstance(nullptr)
     , m_hImageList(nullptr)
     , m_hideHidden(true)
     , m_hideSystem(true)
     , m_sortColumn(-1)
     , m_sortState(0)
+    , m_autoRefresh(true)
+    , m_refreshInterval(1000)
 {
 }
 
@@ -128,10 +133,16 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_GETMINMAXINFO: {
         MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-        mmi->ptMinTrackSize.x = 800;
+        mmi->ptMinTrackSize.x = 1000;
         mmi->ptMinTrackSize.y = 400;
         return 0;
     }
+
+    case WM_TIMER:
+        if (wParam == TIMER_REFRESH) {
+            OnTimer();
+        }
+        return 0;
     }
 
     return DefWindowProcW(m_hwnd, msg, wParam, lParam);
@@ -179,11 +190,36 @@ void MainWindow::CreateControls() {
     );
     Button_SetCheck(m_hCheckHideSystem, BST_CHECKED);
 
+    // Auto refresh checkbox
+    m_hCheckAutoRefresh = CreateWindowExW(
+        0, L"BUTTON", L"Auto refresh",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        600, 12, 100, 20,
+        m_hwnd, reinterpret_cast<HMENU>(IDC_CHECK_AUTO_REFRESH), m_hInstance, nullptr
+    );
+    Button_SetCheck(m_hCheckAutoRefresh, BST_CHECKED);
+
+    // Refresh interval edit
+    m_hEditRefreshTime = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"1000",
+        WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT,
+        705, 10, 50, 22,
+        m_hwnd, reinterpret_cast<HMENU>(IDC_EDIT_REFRESH_TIME), m_hInstance, nullptr
+    );
+
+    // ms label
+    m_hStaticMs = CreateWindowExW(
+        0, L"STATIC", L"ms",
+        WS_CHILD | WS_VISIBLE,
+        760, 12, 25, 20,
+        m_hwnd, nullptr, m_hInstance, nullptr
+    );
+
     // Refresh button
     m_hBtnRefresh = CreateWindowExW(
         0, L"BUTTON", L"Refresh",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        600, 8, 90, 28,
+        795, 8, 80, 28,
         m_hwnd, reinterpret_cast<HMENU>(IDC_BTN_REFRESH), m_hInstance, nullptr
     );
 
@@ -191,7 +227,7 @@ void MainWindow::CreateControls() {
     m_hStaticCount = CreateWindowExW(
         0, L"STATIC", L"0 windows",
         WS_CHILD | WS_VISIBLE | SS_RIGHT,
-        700, 12, 150, 20,
+        885, 12, 120, 20,
         m_hwnd, reinterpret_cast<HMENU>(IDC_STATIC_COUNT), m_hInstance, nullptr
     );
 
@@ -199,10 +235,18 @@ void MainWindow::CreateControls() {
     SendMessage(m_hEditSearch, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hCheckHideHidden, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hCheckHideSystem, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+    SendMessage(m_hCheckAutoRefresh, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+    SendMessage(m_hEditRefreshTime, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+    SendMessage(m_hStaticMs, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hBtnRefresh, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
     SendMessage(m_hStaticCount, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
 
     CreateListView();
+
+    // Start auto refresh timer
+    if (m_autoRefresh) {
+        SetTimer(m_hwnd, TIMER_REFRESH, m_refreshInterval, nullptr);
+    }
 }
 
 void MainWindow::CreateListView() {
@@ -285,6 +329,23 @@ void MainWindow::OnCommand(WORD id, WORD notifyCode) {
             ApplyFilter();
         }
         break;
+
+    case IDC_CHECK_AUTO_REFRESH:
+        m_autoRefresh = Button_GetCheck(m_hCheckAutoRefresh) == BST_CHECKED;
+        UpdateAutoRefresh();
+        break;
+
+    case IDC_EDIT_REFRESH_TIME:
+        if (notifyCode == EN_CHANGE) {
+            wchar_t buffer[16] = {};
+            GetWindowTextW(m_hEditRefreshTime, buffer, 16);
+            int interval = _wtoi(buffer);
+            if (interval >= 100) {  // Minimum 100ms
+                m_refreshInterval = interval;
+                UpdateAutoRefresh();
+            }
+        }
+        break;
     }
 }
 
@@ -327,6 +388,7 @@ void MainWindow::OnNotify(NMHDR* pnmhdr) {
 }
 
 void MainWindow::OnDestroy() {
+    KillTimer(m_hwnd, TIMER_REFRESH);
     PostQuitMessage(0);
 }
 
@@ -606,4 +668,41 @@ void MainWindow::SortWindows() {
 
             return ascending ? (cmp < 0) : (cmp > 0);
         });
+}
+
+void MainWindow::OnTimer() {
+    // Save current selection
+    int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
+    HWND selectedHwnd = nullptr;
+    if (sel >= 0 && sel < static_cast<int>(m_filteredWindows.size())) {
+        selectedHwnd = m_filteredWindows[sel].hwnd;
+    }
+
+    // Refresh window list
+    m_allWindows = WindowEnumerator::EnumerateAllWindows();
+    ApplyFilter();
+
+    // Re-apply sort if active
+    if (m_sortColumn >= 0 && m_sortState != 0) {
+        SortWindows();
+        PopulateListView();
+    }
+
+    // Restore selection
+    if (selectedHwnd) {
+        for (int i = 0; i < static_cast<int>(m_filteredWindows.size()); i++) {
+            if (m_filteredWindows[i].hwnd == selectedHwnd) {
+                ListView_SetItemState(m_hListView, i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                ListView_EnsureVisible(m_hListView, i, FALSE);
+                break;
+            }
+        }
+    }
+}
+
+void MainWindow::UpdateAutoRefresh() {
+    KillTimer(m_hwnd, TIMER_REFRESH);
+    if (m_autoRefresh && m_refreshInterval >= 100) {
+        SetTimer(m_hwnd, TIMER_REFRESH, m_refreshInterval, nullptr);
+    }
 }

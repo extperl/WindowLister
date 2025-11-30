@@ -38,6 +38,8 @@ private:
     void CopyToClipboard(const std::wstring& text);
     void OnColumnClick(int column);
     void SortWindows();
+    void OnTimer();
+    void UpdateAutoRefresh();
 
     HWND m_hwnd;
     HWND m_hListView;
@@ -46,6 +48,9 @@ private:
     HWND m_hBtnRefresh;
     HWND m_hStaticCount;
     HWND m_hEditSearch;
+    HWND m_hCheckAutoRefresh;
+    HWND m_hEditRefreshTime;
+    HWND m_hStaticMs;
     HINSTANCE m_hInstance;
     HIMAGELIST m_hImageList;
 
@@ -59,5 +64,9 @@ private:
     int m_sortColumn;      // -1 = no sort, 0-7 = column index
     int m_sortState;       // 0 = none, 1 = ascending, 2 = descending
 
+    bool m_autoRefresh;
+    UINT m_refreshInterval;
+
+    static const UINT_PTR TIMER_REFRESH = 1;
     static const wchar_t* CLASS_NAME;
 };
