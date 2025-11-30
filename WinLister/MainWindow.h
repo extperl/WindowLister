@@ -24,7 +24,7 @@ private:
     void OnCreate();
     void OnSize(int width, int height);
     void OnCommand(WORD id, WORD notifyCode);
-    void OnNotify(NMHDR* pnmhdr);
+    LRESULT OnNotify(NMHDR* pnmhdr);
     void OnDestroy();
 
     void CreateControls();

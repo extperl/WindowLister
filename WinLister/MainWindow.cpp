@@ -174,9 +174,11 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         OnCommand(LOWORD(wParam), HIWORD(wParam));
         return 0;
 
-    case WM_NOTIFY:
-        OnNotify(reinterpret_cast<NMHDR*>(lParam));
+    case WM_NOTIFY: {
+        LRESULT result = OnNotify(reinterpret_cast<NMHDR*>(lParam));
+        if (result != 0) return result;
         return 0;
+    }
 
     case WM_DESTROY:
         OnDestroy();
@@ -516,7 +518,74 @@ void MainWindow::OnCommand(WORD id, WORD notifyCode) {
     }
 }
 
-void MainWindow::OnNotify(NMHDR* pnmhdr) {
+LRESULT MainWindow::OnNotify(NMHDR* pnmhdr) {
+    // Handle header custom draw for dark mode
+    HWND hHeader = ListView_GetHeader(m_hListView);
+    if (pnmhdr->hwndFrom == hHeader && pnmhdr->code == NM_CUSTOMDRAW && m_darkMode) {
+        NMCUSTOMDRAW* pcd = reinterpret_cast<NMCUSTOMDRAW*>(pnmhdr);
+        switch (pcd->dwDrawStage) {
+        case CDDS_PREPAINT:
+            return CDRF_NOTIFYITEMDRAW;
+        case CDDS_ITEMPREPAINT: {
+            // Get header item info
+            wchar_t text[256] = {};
+            HDITEMW hdi = {};
+            hdi.mask = HDI_TEXT | HDI_FORMAT;
+            hdi.pszText = text;
+            hdi.cchTextMax = 256;
+            Header_GetItem(hHeader, pcd->dwItemSpec, &hdi);
+
+            // Fill background with dark color
+            HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50));
+            FillRect(pcd->hdc, &pcd->rc, hBrush);
+            DeleteObject(hBrush);
+
+            // Draw border
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(70, 70, 70));
+            HPEN hOldPen = (HPEN)SelectObject(pcd->hdc, hPen);
+            MoveToEx(pcd->hdc, pcd->rc.right - 1, pcd->rc.top, nullptr);
+            LineTo(pcd->hdc, pcd->rc.right - 1, pcd->rc.bottom);
+            SelectObject(pcd->hdc, hOldPen);
+            DeleteObject(hPen);
+
+            // Draw text
+            SetBkMode(pcd->hdc, TRANSPARENT);
+            SetTextColor(pcd->hdc, DARK_TEXT);
+            RECT textRect = pcd->rc;
+            textRect.left += 6;
+            textRect.right -= 6;
+            DrawTextW(pcd->hdc, text, -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+            // Draw sort arrow if present
+            if (hdi.fmt & HDF_SORTUP) {
+                int cx = (pcd->rc.right - 10);
+                int cy = pcd->rc.top + (pcd->rc.bottom - pcd->rc.top) / 2;
+                POINT pts[3] = { {cx, cy - 3}, {cx + 4, cy + 2}, {cx - 4, cy + 2} };
+                HPEN hArrowPen = CreatePen(PS_SOLID, 1, DARK_TEXT);
+                HBRUSH hArrowBrush = CreateSolidBrush(DARK_TEXT);
+                SelectObject(pcd->hdc, hArrowPen);
+                SelectObject(pcd->hdc, hArrowBrush);
+                Polygon(pcd->hdc, pts, 3);
+                DeleteObject(hArrowPen);
+                DeleteObject(hArrowBrush);
+            } else if (hdi.fmt & HDF_SORTDOWN) {
+                int cx = (pcd->rc.right - 10);
+                int cy = pcd->rc.top + (pcd->rc.bottom - pcd->rc.top) / 2;
+                POINT pts[3] = { {cx, cy + 3}, {cx + 4, cy - 2}, {cx - 4, cy - 2} };
+                HPEN hArrowPen = CreatePen(PS_SOLID, 1, DARK_TEXT);
+                HBRUSH hArrowBrush = CreateSolidBrush(DARK_TEXT);
+                SelectObject(pcd->hdc, hArrowPen);
+                SelectObject(pcd->hdc, hArrowBrush);
+                Polygon(pcd->hdc, pts, 3);
+                DeleteObject(hArrowPen);
+                DeleteObject(hArrowBrush);
+            }
+
+            return CDRF_SKIPDEFAULT;
+        }
+        }
+    }
+
     if (pnmhdr->idFrom == IDC_LISTVIEW) {
         switch (pnmhdr->code) {
         case NM_DBLCLK: {
@@ -552,6 +621,8 @@ void MainWindow::OnNotify(NMHDR* pnmhdr) {
         }
         }
     }
+
+    return 0;
 }
 
 void MainWindow::OnDestroy() {
@@ -909,9 +980,12 @@ void MainWindow::ApplyDarkMode() {
         ListView_SetTextBkColor(m_hListView, DARK_LISTVIEW_BG);
         ListView_SetTextColor(m_hListView, DARK_TEXT);
 
-        // Header dark mode
+        // Header dark mode - need to allow dark mode and set theme
         HWND hHeader = ListView_GetHeader(m_hListView);
         SetWindowTheme(hHeader, L"DarkMode_ItemsView", nullptr);
+        if (pAllowDarkModeForWindow) {
+            pAllowDarkModeForWindow(hHeader, true);
+        }
 
         // Apply dark theme to buttons and checkboxes
         SetWindowTheme(m_hCheckHideHidden, L"DarkMode_Explorer", nullptr);
