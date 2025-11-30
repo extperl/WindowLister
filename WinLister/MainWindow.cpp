@@ -5,8 +5,31 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <dwmapi.h>
+#include <uxtheme.h>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "uxtheme.lib")
+
+// Dark mode colors
+static const COLORREF DARK_BG = RGB(32, 32, 32);
+static const COLORREF DARK_TEXT = RGB(255, 255, 255);
+static const COLORREF DARK_LISTVIEW_BG = RGB(45, 45, 45);
+static const COLORREF DARK_EDIT_BG = RGB(50, 50, 50);
+
+// Undocumented dark mode APIs
+enum IMMERSIVE_HC_CACHE_MODE { IHCM_USE_CACHED_VALUE, IHCM_REFRESH };
+enum PreferredAppMode { Default, AllowDark, ForceDark, ForceLight, Max };
+using fnSetWindowCompositionAttribute = BOOL(WINAPI*)(HWND, void*);
+using fnShouldAppsUseDarkMode = bool(WINAPI*)();
+using fnAllowDarkModeForWindow = bool(WINAPI*)(HWND, bool);
+using fnSetPreferredAppMode = PreferredAppMode(WINAPI*)(PreferredAppMode);
+using fnRefreshImmersiveColorPolicyState = void(WINAPI*)();
+
+static fnSetWindowCompositionAttribute pSetWindowCompositionAttribute = nullptr;
+static fnAllowDarkModeForWindow pAllowDarkModeForWindow = nullptr;
+static fnSetPreferredAppMode pSetPreferredAppMode = nullptr;
+static fnRefreshImmersiveColorPolicyState pRefreshImmersiveColorPolicyState = nullptr;
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -32,12 +55,38 @@ MainWindow::MainWindow()
     , m_sortState(0)
     , m_autoRefresh(true)
     , m_refreshInterval(1000)
+    , m_darkMode(false)
+    , m_hDarkBrush(nullptr)
 {
+    // Load dark mode APIs
+    HMODULE hUxtheme = LoadLibraryW(L"uxtheme.dll");
+    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+
+    if (hUxtheme) {
+        pAllowDarkModeForWindow = reinterpret_cast<fnAllowDarkModeForWindow>(
+            GetProcAddress(hUxtheme, MAKEINTRESOURCEA(133)));
+        pSetPreferredAppMode = reinterpret_cast<fnSetPreferredAppMode>(
+            GetProcAddress(hUxtheme, MAKEINTRESOURCEA(135)));
+        pRefreshImmersiveColorPolicyState = reinterpret_cast<fnRefreshImmersiveColorPolicyState>(
+            GetProcAddress(hUxtheme, MAKEINTRESOURCEA(104)));
+    }
+    if (hUser32) {
+        pSetWindowCompositionAttribute = reinterpret_cast<fnSetWindowCompositionAttribute>(
+            GetProcAddress(hUser32, "SetWindowCompositionAttribute"));
+    }
+
+    // Enable dark mode for the app
+    if (pSetPreferredAppMode) {
+        pSetPreferredAppMode(AllowDark);
+    }
 }
 
 MainWindow::~MainWindow() {
     if (m_hImageList) {
         ImageList_Destroy(m_hImageList);
+    }
+    if (m_hDarkBrush) {
+        DeleteObject(m_hDarkBrush);
     }
 }
 
@@ -57,7 +106,8 @@ bool MainWindow::Create(HINSTANCE hInstance) {
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = CLASS_NAME;
-    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_WINLISTER));
+    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_WINLISTER));
 
     if (!RegisterClassExW(&wc)) {
         return false;
@@ -143,13 +193,41 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             OnTimer();
         }
         return 0;
+
+    case WM_SETTINGCHANGE:
+        OnSettingChange(wParam, lParam);
+        return 0;
+
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORSTATIC:
+        if (m_darkMode) {
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdc, DARK_TEXT);
+            SetBkColor(hdc, DARK_BG);
+            return reinterpret_cast<LRESULT>(m_hDarkBrush);
+        }
+        break;
+
+    case WM_ERASEBKGND:
+        if (m_darkMode) {
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            RECT rc;
+            GetClientRect(m_hwnd, &rc);
+            FillRect(hdc, &rc, m_hDarkBrush);
+            return 1;
+        }
+        break;
     }
 
     return DefWindowProcW(m_hwnd, msg, wParam, lParam);
 }
 
 void MainWindow::OnCreate() {
+    m_hDarkBrush = CreateSolidBrush(DARK_BG);
+    m_darkMode = IsDarkModeEnabled();
+
     CreateControls();
+    ApplyDarkMode();
     RefreshWindowList();
 }
 
@@ -704,5 +782,75 @@ void MainWindow::UpdateAutoRefresh() {
     KillTimer(m_hwnd, TIMER_REFRESH);
     if (m_autoRefresh && m_refreshInterval >= 100) {
         SetTimer(m_hwnd, TIMER_REFRESH, m_refreshInterval, nullptr);
+    }
+}
+
+bool MainWindow::IsDarkModeEnabled() {
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD value = 1;
+        DWORD size = sizeof(value);
+        RegQueryValueExW(hKey, L"AppsUseLightTheme", nullptr, nullptr,
+            reinterpret_cast<LPBYTE>(&value), &size);
+        RegCloseKey(hKey);
+        return value == 0;
+    }
+    return false;
+}
+
+void MainWindow::SetDarkModeForWindow(HWND hwnd) {
+    if (pAllowDarkModeForWindow) {
+        pAllowDarkModeForWindow(hwnd, m_darkMode);
+    }
+
+    // Set dark mode title bar
+    BOOL darkMode = m_darkMode ? TRUE : FALSE;
+    DwmSetWindowAttribute(hwnd, 20, &darkMode, sizeof(darkMode));  // DWMWA_USE_IMMERSIVE_DARK_MODE
+}
+
+void MainWindow::ApplyDarkMode() {
+    SetDarkModeForWindow(m_hwnd);
+
+    if (m_darkMode) {
+        // Apply dark theme to ListView
+        SetWindowTheme(m_hListView, L"DarkMode_Explorer", nullptr);
+        ListView_SetBkColor(m_hListView, DARK_LISTVIEW_BG);
+        ListView_SetTextBkColor(m_hListView, DARK_LISTVIEW_BG);
+        ListView_SetTextColor(m_hListView, DARK_TEXT);
+
+        // Header dark mode
+        HWND hHeader = ListView_GetHeader(m_hListView);
+        SetWindowTheme(hHeader, L"DarkMode_ItemsView", nullptr);
+    } else {
+        SetWindowTheme(m_hListView, L"Explorer", nullptr);
+        ListView_SetBkColor(m_hListView, GetSysColor(COLOR_WINDOW));
+        ListView_SetTextBkColor(m_hListView, GetSysColor(COLOR_WINDOW));
+        ListView_SetTextColor(m_hListView, GetSysColor(COLOR_WINDOWTEXT));
+
+        HWND hHeader = ListView_GetHeader(m_hListView);
+        SetWindowTheme(hHeader, L"ItemsView", nullptr);
+    }
+
+    // Force redraw
+    InvalidateRect(m_hwnd, nullptr, TRUE);
+    InvalidateRect(m_hListView, nullptr, TRUE);
+}
+
+void MainWindow::UpdateDarkMode() {
+    bool newDarkMode = IsDarkModeEnabled();
+    if (newDarkMode != m_darkMode) {
+        m_darkMode = newDarkMode;
+        ApplyDarkMode();
+    }
+}
+
+void MainWindow::OnSettingChange(WPARAM wParam, LPARAM lParam) {
+    if (lParam) {
+        const wchar_t* setting = reinterpret_cast<const wchar_t*>(lParam);
+        if (wcscmp(setting, L"ImmersiveColorSet") == 0) {
+            UpdateDarkMode();
+        }
     }
 }

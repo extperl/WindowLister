@@ -40,6 +40,11 @@ private:
     void SortWindows();
     void OnTimer();
     void UpdateAutoRefresh();
+    void ApplyDarkMode();
+    void UpdateDarkMode();
+    bool IsDarkModeEnabled();
+    void SetDarkModeForWindow(HWND hwnd);
+    void OnSettingChange(WPARAM wParam, LPARAM lParam);
 
     HWND m_hwnd;
     HWND m_hListView;
@@ -66,6 +71,9 @@ private:
 
     bool m_autoRefresh;
     UINT m_refreshInterval;
+
+    bool m_darkMode;
+    HBRUSH m_hDarkBrush;
 
     static const UINT_PTR TIMER_REFRESH = 1;
     static const wchar_t* CLASS_NAME;

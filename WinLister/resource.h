@@ -1,5 +1,8 @@
 #pragma once
 
+// Icon
+#define IDI_WINLISTER           100
+
 // Main Window Controls
 #define IDC_LISTVIEW            1001
 #define IDC_CHECK_HIDE_HIDDEN   1002
