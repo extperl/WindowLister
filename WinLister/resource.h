@@ -36,3 +36,24 @@
 #define IDC_DETAIL_LIST         3001
 #define IDC_BTN_COPY            3002
 #define IDC_BTN_CLOSE           3003
+
+// Detail Dialog - Modify Tab Controls
+#define IDC_TAB_CONTROL         3010
+#define IDC_EDIT_TITLE          3011
+#define IDC_BTN_SET_TITLE       3012
+#define IDC_EDIT_LEFT           3013
+#define IDC_EDIT_TOP            3014
+#define IDC_EDIT_WIDTH          3015
+#define IDC_EDIT_HEIGHT         3016
+#define IDC_BTN_SET_POS         3017
+#define IDC_CHECK_VISIBLE       3018
+#define IDC_CHECK_ENABLED       3019
+#define IDC_CHECK_TOPMOST       3020
+#define IDC_BTN_SET_STATE       3021
+#define IDC_SLIDER_ALPHA        3022
+#define IDC_EDIT_ALPHA          3023
+#define IDC_BTN_SET_ALPHA       3024
+#define IDC_BTN_MINIMIZE        3025
+#define IDC_BTN_MAXIMIZE        3026
+#define IDC_BTN_RESTORE         3027
+#define IDC_BTN_REFRESH_INFO    3028
