@@ -50,6 +50,7 @@ INT_PTR DetailDialog::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
         case IDC_BTN_CLOSE:
         case IDCANCEL:
+            KillTimer(hwnd, TIMER_REFRESH);
             EndDialog(hwnd, 0);
             return TRUE;
 
@@ -83,6 +84,43 @@ INT_PTR DetailDialog::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
         case IDC_BTN_REFRESH_INFO:
             RefreshWindowInfo(hwnd);
+            return TRUE;
+
+        case IDC_DETAIL_AUTO_REFRESH:
+            m_autoRefresh = (SendMessageW(m_hCheckAutoRefresh, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            if (m_autoRefresh) {
+                SetTimer(hwnd, TIMER_REFRESH, m_refreshInterval, nullptr);
+            } else {
+                KillTimer(hwnd, TIMER_REFRESH);
+            }
+            return TRUE;
+
+        case IDC_DETAIL_REFRESH_TIME:
+            if (HIWORD(wParam) == EN_CHANGE) {
+                wchar_t buffer[16] = {};
+                GetWindowTextW(m_hEditRefreshTime, buffer, 16);
+                int interval = _wtoi(buffer);
+                if (interval >= 100) {  // Minimum 100ms
+                    m_refreshInterval = interval;
+                    if (m_autoRefresh) {
+                        KillTimer(hwnd, TIMER_REFRESH);
+                        SetTimer(hwnd, TIMER_REFRESH, m_refreshInterval, nullptr);
+                    }
+                }
+            }
+            return TRUE;
+        }
+        break;
+
+    case WM_TIMER:
+        if (wParam == TIMER_REFRESH) {
+            if (IsTargetWindowValid()) {
+                RefreshWindowInfo(hwnd);
+            } else {
+                KillTimer(hwnd, TIMER_REFRESH);
+                SendMessageW(m_hCheckAutoRefresh, BM_SETCHECK, BST_UNCHECKED, 0);
+                m_autoRefresh = false;
+            }
             return TRUE;
         }
         break;
@@ -119,13 +157,25 @@ INT_PTR DetailDialog::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             MoveWindow(m_hListView, tabRect.left, tabRect.top, tabContentWidth, tabContentHeight, TRUE);
         }
 
-        // Buttons at bottom
-        if (m_hBtnCopy && m_hBtnClose) {
-            MoveWindow(m_hBtnCopy, width - 230, height - 40, 100, 30, TRUE);
-            MoveWindow(m_hBtnClose, width - 120, height - 40, 100, 30, TRUE);
+        // Bottom toolbar - left side: Auto refresh, interval, ms, Refresh button
+        int y = height - 40;
+        if (m_hCheckAutoRefresh) {
+            MoveWindow(m_hCheckAutoRefresh, 10, y + 3, 95, 24, TRUE);
+        }
+        if (m_hEditRefreshTime) {
+            MoveWindow(m_hEditRefreshTime, 110, y + 2, 50, 24, TRUE);
+        }
+        if (m_hStaticMs) {
+            MoveWindow(m_hStaticMs, 165, y + 6, 25, 20, TRUE);
         }
         if (m_hBtnRefresh) {
-            MoveWindow(m_hBtnRefresh, width - 340, height - 40, 100, 30, TRUE);
+            MoveWindow(m_hBtnRefresh, 195, y, 80, 28, TRUE);
+        }
+
+        // Bottom toolbar - right side: Copy, Close buttons
+        if (m_hBtnCopy && m_hBtnClose) {
+            MoveWindow(m_hBtnCopy, width - 220, y, 100, 28, TRUE);
+            MoveWindow(m_hBtnClose, width - 110, y, 100, 28, TRUE);
         }
         return TRUE;
     }
@@ -238,6 +288,44 @@ void DetailDialog::CreateTabControl(HWND hwnd) {
     // Get existing buttons
     m_hBtnCopy = GetDlgItem(hwnd, IDC_BTN_COPY);
     m_hBtnClose = GetDlgItem(hwnd, IDC_BTN_CLOSE);
+
+    HINSTANCE hInst = GetModuleHandle(nullptr);
+
+    // Create bottom toolbar controls (left side): Auto refresh checkbox, interval, ms label, Refresh button
+    // These are positioned in WM_SIZE handler
+
+    m_hCheckAutoRefresh = CreateWindowExW(
+        0, L"BUTTON", L"Auto refresh",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        10, rc.bottom - 40, 95, 24,
+        hwnd, reinterpret_cast<HMENU>(IDC_DETAIL_AUTO_REFRESH), hInst, nullptr);
+    SendMessageW(m_hCheckAutoRefresh, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+
+    m_hEditRefreshTime = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"1000",
+        WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT,
+        110, rc.bottom - 40, 50, 24,
+        hwnd, reinterpret_cast<HMENU>(IDC_DETAIL_REFRESH_TIME), hInst, nullptr);
+    SendMessageW(m_hEditRefreshTime, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+
+    m_hStaticMs = CreateWindowExW(
+        0, L"STATIC", L"ms",
+        WS_CHILD | WS_VISIBLE,
+        165, rc.bottom - 36, 25, 20,
+        hwnd, nullptr, hInst, nullptr);
+    SendMessageW(m_hStaticMs, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+
+    m_hBtnRefresh = CreateWindowExW(
+        0, L"BUTTON", L"Refresh",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        195, rc.bottom - 40, 80, 28,
+        hwnd, reinterpret_cast<HMENU>(IDC_BTN_REFRESH_INFO), hInst, nullptr);
+    SendMessageW(m_hBtnRefresh, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+
+    // Enable auto-refresh by default
+    m_autoRefresh = true;
+    SendMessageW(m_hCheckAutoRefresh, BM_SETCHECK, BST_CHECKED, 0);
+    SetTimer(hwnd, TIMER_REFRESH, m_refreshInterval, nullptr);
 }
 
 void DetailDialog::CreateModifyControls(HWND hwnd) {
@@ -443,13 +531,6 @@ void DetailDialog::CreateModifyControls(HWND hwnd) {
         contentX + 375, y, buttonWidth, 24,
         hwnd, reinterpret_cast<HMENU>(IDC_BTN_SET_ALPHA), hInst, nullptr);
     SendMessageW(m_hBtnSetAlpha, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
-
-    // Refresh button at bottom
-    m_hBtnRefresh = CreateWindowExW(0, L"BUTTON", L"Refresh",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        rc.right - 340, rc.bottom - 40, 100, 30,
-        hwnd, reinterpret_cast<HMENU>(IDC_BTN_REFRESH_INFO), hInst, nullptr);
-    SendMessageW(m_hBtnRefresh, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
 }
 
 void DetailDialog::PopulateDetails(HWND hwnd) {
@@ -843,6 +924,10 @@ void DetailDialog::RefreshWindowInfo(HWND hwnd) {
         return;
     }
 
+    // Save scroll position and selection
+    int topIndex = ListView_GetTopIndex(m_hListView);
+    int selectedItem = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
+
     // Re-gather window information
     m_windowInfo = WindowEnumerator::GetWindowDetails(m_windowInfo.hwnd);
 
@@ -858,6 +943,15 @@ void DetailDialog::RefreshWindowInfo(HWND hwnd) {
     // Update both tabs
     PopulateDetails(hwnd);
     PopulateModifyTab(hwnd);
+
+    // Restore scroll position and selection
+    if (topIndex > 0) {
+        ListView_EnsureVisible(m_hListView, ListView_GetItemCount(m_hListView) - 1, FALSE);
+        ListView_EnsureVisible(m_hListView, topIndex, FALSE);
+    }
+    if (selectedItem >= 0 && selectedItem < ListView_GetItemCount(m_hListView)) {
+        ListView_SetItemState(m_hListView, selectedItem, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    }
 }
 
 void DetailDialog::OnAlphaSliderChanged(HWND hwnd) {

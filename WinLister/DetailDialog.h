@@ -74,4 +74,13 @@ private:
     HWND m_hBtnRestore = nullptr;
     HWND m_hBtnRefresh = nullptr;
     HWND m_hBtnClose = nullptr;
+
+    // Auto refresh controls
+    HWND m_hCheckAutoRefresh = nullptr;
+    HWND m_hEditRefreshTime = nullptr;
+    HWND m_hStaticMs = nullptr;
+    bool m_autoRefresh = false;
+    int m_refreshInterval = 1000;
+
+    static const UINT_PTR TIMER_REFRESH = 1;
 };
